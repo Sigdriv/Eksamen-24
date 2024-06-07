@@ -22,15 +22,6 @@ const incrementIp = (ip: string) => {
     if (ipParts[i] < 255) {
       // If the part is less than 255, increment it and stop the loop
       ipParts[i]++;
-      // Check if the next IP is going to be "192.168.0.1"
-      if (ipParts[ipParts.length - 1] === 1) {
-        // If it is, increment the next part of the IP address
-        if (i > 0) {
-          ipParts[i] = 0;
-          ipParts[i - 1]++;
-        }
-      }
-
       break;
     } else {
       // If the part is 255, reset it to 0 and continue to the next part
@@ -49,11 +40,7 @@ export default function DHCPProtocol() {
   const [clients, setClients] = useState<{ id: number; ip: string }[]>([]);
   const [messages, setMessages] = useState<string[]>([]);
   const [assignedIps, setAssignedIps] = useState<Set<string>>(new Set());
-  const [pending, startTransition] = useTransition();
-
-  const RemoveMessages = () => {
-    setMessages([]);
-  };
+  const [isPending, startTransition] = useTransition();
 
   const handleSetScope = (startIp: string, endIp: string) => {
     if (validateIp(startIp) && validateIp(endIp) && startIp < endIp) {
@@ -64,54 +51,66 @@ export default function DHCPProtocol() {
     }
   };
 
-  // Function to simulate the DHCP process
-  const simulateDHCPProcess = (clientId: number, newIp: string) => {
-    const dhcpMessages = [
-      `Client ${clientId} sent DHCP DISCOVER`,
-      `Server sent DHCP OFFER to Client ${clientId}`,
-      `Client ${clientId} sent DHCP REQUEST`,
-      `Server sent DHCP ACK to Client ${clientId}`,
-      `Client ${clientId} successfully assigned IP: ${newIp}`,
-    ];
+  const createDHCPMessages = (clientId: number, newIp: string) => [
+    `Client ${clientId} sent DHCP DISCOVER`,
+    `Server sent DHCP OFFER to Client ${clientId}`,
+    `Client ${clientId} sent DHCP REQUEST`,
+    `Server sent DHCP ACK to Client ${clientId}`,
+    `Client ${clientId} successfully assigned IP: ${newIp}`,
+  ];
 
-    dhcpMessages.forEach((message, index) => {
-      setTimeout(() => {
-        setMessages((prevMessages) => [...prevMessages, message]);
+  const updateState = (
+    message: string,
+    index: number,
+    dhcpMessages: string[],
+    clientId: number,
+    newIp: string
+  ) => {
+    setMessages((prevMessages) => [...prevMessages, message]);
 
-        if (index === dhcpMessages.length - 1) {
-          setClients((prevClients) => [
-            ...prevClients,
-            { id: clientId, ip: newIp },
-          ]);
+    if (index === dhcpMessages.length - 1) {
+      setClients((prevClients) => [
+        ...prevClients,
+        { id: clientId, ip: newIp },
+      ]);
 
-          setAssignedIps((prevAssignedIps) => {
-            const newAssignedIps = new Set(prevAssignedIps);
-            newAssignedIps.add(newIp);
-            return newAssignedIps;
-          });
-        }
-      }, 1000 * (index + 1));
-    });
+      setAssignedIps((prevAssignedIps) => {
+        const newAssignedIps = new Set(prevAssignedIps);
+        newAssignedIps.add(newIp);
+        return newAssignedIps;
+      });
+    }
+  };
+
+  const simulateDHCPProcess = async (clientId: number, newIp: string) => {
+    const dhcpMessages = createDHCPMessages(clientId, newIp);
+
+    for (let index = 0; index < dhcpMessages.length; index++) {
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+      updateState(dhcpMessages[index], index, dhcpMessages, clientId, newIp);
+    }
   };
 
   const addClient = () => {
-    if (!scope) {
-      alert("Please set a valid DHCP scope first.");
-      return;
-    }
+    startTransition(() => {
+      if (!scope) {
+        alert("Please set a valid DHCP scope first.");
+        return;
+      }
 
-    let newIp = scope.startIp;
-    while (assignedIps.has(newIp) && newIp <= scope.endIp) {
-      newIp = incrementIp(newIp);
-    }
+      let newIp = scope.startIp;
+      while (assignedIps.has(newIp) && newIp <= scope.endIp) {
+        newIp = incrementIp(newIp);
+      }
 
-    if (newIp > scope.endIp) {
-      alert("No available IP addresses in the DHCP scope.");
-      return;
-    }
+      if (newIp > scope.endIp) {
+        alert("No available IP addresses in the DHCP scope.");
+        return;
+      }
 
-    const clientId = clients.length + 1;
-    simulateDHCPProcess(clientId, newIp);
+      const clientId = clients.length + 1;
+      simulateDHCPProcess(clientId, newIp);
+    });
   };
 
   const RemoveClient = (id: number) => {
@@ -120,7 +119,9 @@ export default function DHCPProtocol() {
     );
     setAssignedIps((prevAssignedIps) => {
       const newAssignedIps = new Set(prevAssignedIps);
-      newAssignedIps.delete(clients.find((client) => client.id === id)?.ip);
+      newAssignedIps.delete(
+        clients.find((client) => client.id === id)?.ip ?? ""
+      );
       return newAssignedIps;
     });
   };
@@ -131,7 +132,9 @@ export default function DHCPProtocol() {
       <DHCPServer setScope={handleSetScope} />
       <div>
         <h2>Clients</h2>
-        <button onClick={addClient}>Add Client</button>
+        <button onClick={addClient} disabled={isPending}>
+          Add Client
+        </button>
         <div>
           {clients.map((client) => (
             <Client
@@ -145,7 +148,7 @@ export default function DHCPProtocol() {
       </div>
       <div>
         <h1>DHCP Communication Steps</h1>
-        <button onClick={RemoveMessages}>Remove all messages</button>
+        <button onClick={() => setMessages([])}>Remove all messages</button>
         <Communication messages={messages} />
       </div>
     </div>
